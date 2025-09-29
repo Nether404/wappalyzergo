@@ -1,2 +1,3 @@
 
 cmd/update-fingerprints/update-fingerprints
+.env
