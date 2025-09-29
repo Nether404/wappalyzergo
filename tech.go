@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Wappalyze is a client for working with tech detection
 type Wappalyze struct {
 	original     *Fingerprints
 	fingerprints *CompiledFingerprints
+	metrics      *PerformanceMetrics
 }
 
 // New creates a new tech detection instance
@@ -20,6 +22,7 @@ func New() (*Wappalyze, error) {
 		fingerprints: &CompiledFingerprints{
 			Apps: make(map[string]*CompiledFingerprint),
 		},
+		metrics: NewPerformanceMetrics(),
 	}
 
 	err := wappalyze.loadFingerprints()
@@ -39,6 +42,7 @@ func NewFromFile(filePath string, loadEmbedded, supersede bool) (*Wappalyze, err
 		fingerprints: &CompiledFingerprints{
 			Apps: make(map[string]*CompiledFingerprint),
 		},
+		metrics: NewPerformanceMetrics(),
 	}
 
 	err := wappalyze.loadFingerprintsFromFile(filePath, loadEmbedded, supersede)
@@ -47,6 +51,16 @@ func NewFromFile(filePath string, loadEmbedded, supersede bool) (*Wappalyze, err
 	}
 
 	return wappalyze, nil
+}
+
+// GetMetrics returns performance metrics
+func (s *Wappalyze) GetMetrics() PerformanceMetrics {
+	return s.metrics.GetMetrics()
+}
+
+// ResetMetrics clears performance metrics
+func (s *Wappalyze) ResetMetrics() {
+	s.metrics.Reset()
 }
 
 // GetFingerprints returns the original fingerprints
@@ -126,6 +140,13 @@ func (s *Wappalyze) loadFingerprintsFromFile(filePath string, loadEmbedded, supe
 // Body should not be mutated while this function is being called, or it may
 // lead to unexpected things.
 func (s *Wappalyze) Fingerprint(headers map[string][]string, body []byte) map[string]struct{} {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		// We'll count technologies in the result, but for now just record the request
+		s.metrics.RecordRequest(duration, 0)
+	}()
+
 	uniqueFingerprints := NewUniqueFingerprints()
 
 	// Lowercase everything that we have received to check
@@ -151,7 +172,11 @@ func (s *Wappalyze) Fingerprint(headers map[string][]string, body []byte) map[st
 	for _, app := range bodyTech {
 		uniqueFingerprints.SetIfNotExists(app.application, app.version, app.confidence)
 	}
-	return uniqueFingerprints.GetValues()
+	
+	result := uniqueFingerprints.GetValues()
+	// Update metrics with actual technology count
+	s.metrics.RecordRequest(0, len(result)) // Duration already recorded above
+	return result
 }
 
 type UniqueFingerprints struct {
